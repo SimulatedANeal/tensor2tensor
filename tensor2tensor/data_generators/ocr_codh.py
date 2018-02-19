@@ -242,10 +242,10 @@ class OcrPmjtProblem(image_utils.Image2TextProblem):
                 threads.append(t)
                 thread_counter += 1
 
-        coord = tf.train.Coordinator()
         num_batches = int(
             ceil(float(len(threads)) / MAX_CONCURRENT_THREADS))
         for i in xrange(num_batches):
+            coord = tf.train.Coordinator()
             start = i * MAX_CONCURRENT_THREADS
             end = start + MAX_CONCURRENT_THREADS
             current = threads[start:end]
@@ -275,19 +275,7 @@ class OcrPmjtProblem(image_utils.Image2TextProblem):
         p.loss_multiplier = 1.0
         p.input_space_id = problem.SpaceID.IMAGE
         p.target_space_id = self.target_space_id
-
-    def max_length(self, model_hparams):
-        """Maximum sequence length.
-
-        Problems with fixed length should override.
-
-        Args:
-          model_hparams: model hyperparameters
-        Returns:
-          an integer
-        """
-        return (model_hparams.split_to_length or model_hparams.max_length or
-                model_hparams.batch_size)
+        p.batch_size = 10
 
     def dataset_filename(self):
         return self.name
@@ -302,12 +290,23 @@ class OcrPmjtProblem(image_utils.Image2TextProblem):
         return {"inputs": input_encoder, "targets": encoder}
 
     def example_reading_spec(self):
-        label_key = "image/class/label"
-        data_fields, data_items_to_decoders = (
-            super(image_utils.Image2TextProblem, self).example_reading_spec())
-        data_fields[label_key] = tf.VarLenFeature(tf.int64)
-        data_items_to_decoders[
-            "targets"] = tf.contrib.slim.tfexample_decoder.Tensor(label_key)
+        data_fields = {
+            "image/encoded": tf.FixedLenFeature([], tf.string),
+            "image/format": tf.FixedLenFeature([], tf.string),
+            # "image/class/label": tf.FixedLenSequenceFeature([], tf.int64),
+            "image/class/label": tf.VarLenFeature(tf.int64),
+        }
+
+        data_items_to_decoders = {
+            "inputs":
+                tf.contrib.slim.tfexample_decoder.Image(
+                    image_key="image/encoded",
+                    format_key="image/format",
+                    channels=self.num_channels),
+            "targets":
+                tf.contrib.slim.tfexample_decoder.Tensor("image/class/label")
+        }
+
         return data_fields, data_items_to_decoders
 
     def preprocess_example(self, example, mode, hparams):
@@ -334,6 +333,10 @@ class OcrPmjtProblem(image_utils.Image2TextProblem):
         return [
             metrics.Metrics.ACC_PER_SEQ, metrics.Metrics.EDIT_DISTANCE
         ]
+
+    @property
+    def batch_size_means_tokens(self):
+        return False
 
     @property
     def is_character_level(self):
@@ -584,12 +587,10 @@ class OcrPmjtChar(OcrPmjtProblem):
         return (64, 64)
 
     def preprocess_example(self, example, mode, hparams):
-        example = super(OcrPmjtChar, self).preprocess_example(example,
-                                                              mode,
-                                                              hparams)
-        img = example["inputs"]
-        img = tf.image.resize_images(img, [64,64], tf.image.ResizeMethod.AREA)
-        example["inputs"] = img
+        example = super(OcrPmjtChar, self).preprocess_example(
+            example, mode, hparams)
+        example["inputs"].set_shape([64,64,1])
+        example["targets"].set_shape([1])
         return example
 
 @registry.register_problem()
