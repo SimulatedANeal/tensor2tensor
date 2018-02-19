@@ -25,6 +25,7 @@ import tensorflow as tf
 
 # End-of-sentence marker.
 EOS = text_encoder.EOS_ID
+OOV = "<UNK>"
 
 URL = "http://codh.rois.ac.jp/char-shape/book/"
 
@@ -212,7 +213,9 @@ class OcrPmjtProblem(image_utils.Image2TextProblem):
         train_meta = self._load_image_meta(data_dir, 'train')
         dev_meta = self._load_image_meta(data_dir, 'dev')
         encoder = text_encoder.TokenTextEncoder(
-            os.path.join(data_dir, self.vocab_name))
+            os.path.join(data_dir, self.vocab_name),
+            replace_oov=OOV
+        )
 
         train_paths = self.training_filepaths(
             data_dir, self.train_shards, shuffled=False)
@@ -321,10 +324,8 @@ class OcrPmjtProblem(image_utils.Image2TextProblem):
         Returns:
           dict or Dataset
         """
-        # Resize from usual size ~1350x60 to 90x4 in this test.
         img = example["inputs"]
-        img = tf.to_int64(
-            tf.image.resize_images(img, [90, 4], tf.image.ResizeMethod.AREA))
+        img = tf.to_int64(tf.image.rgb_to_grayscale(img))
         img = tf.image.per_image_standardization(img)
         example["inputs"] = img
         return example
@@ -333,6 +334,10 @@ class OcrPmjtProblem(image_utils.Image2TextProblem):
         return [
             metrics.Metrics.ACC_PER_SEQ, metrics.Metrics.EDIT_DISTANCE
         ]
+
+    @property
+    def is_character_level(self):
+        return False
 
     @property
     def image_scope(self):
@@ -464,8 +469,10 @@ class OcrPmjtProblem(image_utils.Image2TextProblem):
                 for l in image.label:
                     token_counts[l] += 1
             tokens, counts = zip(*token_counts.most_common(self.vocab_size))
+            tokens = (OOV,) + tokens
             vocab_encoder = text_encoder.TokenTextEncoder(None,
-                                                          vocab_list=tokens)
+                                                          vocab_list=tokens,
+                                                          num_reserved_ids=3)
             vocab_encoder.store_to_file(vocab_file)
             tf.logging.info("Saved in %s" % vocab_file)
 
@@ -575,6 +582,15 @@ class OcrPmjtChar(OcrPmjtProblem):
     @property
     def image_shape(self):
         return (64, 64)
+
+    def preprocess_example(self, example, mode, hparams):
+        example = super(OcrPmjtChar, self).preprocess_example(example,
+                                                              mode,
+                                                              hparams)
+        img = example["inputs"]
+        img = tf.image.resize_images(img, [64,64], tf.image.ResizeMethod.AREA)
+        example["inputs"] = img
+        return example
 
 @registry.register_problem()
 class OcrPmjtSeq(OcrPmjtProblem):
