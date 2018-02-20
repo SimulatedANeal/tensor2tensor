@@ -216,6 +216,14 @@ def transformer_revnet_decoder(decoder_input,
     y = tf.concat([y1, y2], axis=-1)
     return common_layers.layer_preprocess(y, hparams)
 
+@registry.register_hparams
+def transformer_revnet_small():
+    hparams = transformer.transformer_small()
+
+    # Use settings from transformer_n_da
+    hparams.layer_preprocess_sequence = "n"
+    hparams.layer_postprocess_sequence = "da"
+    hparams.learning_rate = 0.4
 
 @registry.register_hparams
 def transformer_revnet_base():
